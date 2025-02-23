@@ -1,0 +1,53 @@
+name: Process Resource Request
+on:
+  issues:
+    types: [opened]
+
+jobs:
+  generate-terraform:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Parse Issue Form
+        id: parse
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const issueBody = context.payload.issue.body;
+            const resourceType = issueBody.match(/Resource Type:\s*(.+)/)?.[1];
+            const name = issueBody.match(/Name:\s*(.+)/)?.[1];
+            const machineType = issueBody.match(/Machine Type:\s*(.+)/)?.[1];
+            const region = issueBody.match(/Region:\s*(.+)/)?.[1];
+            const additionalConfig = issueBody.match(/Additional Config:\s*(.+)/)?.[1] || "";
+            return { resourceType, name, machineType, region, additionalConfig };
+          result-encoding: json
+
+      - name: Generate Terraform File
+        run: |
+          mkdir -p resources
+          cat <<EOF > resources/${{ steps.parse.outputs.name }}.tf
+          resource "google_compute_instance" "${{ steps.parse.outputs.name }}" {
+            name         = "${{ steps.parse.outputs.name }}"
+            machine_type = "${{ steps.parse.outputs.machineType }}"
+            zone         = "${{ steps.parse.outputs.region }}-a"
+            boot_disk {
+              initialize_params {
+                image = "debian-cloud/debian-11"
+              }
+            }
+            network_interface {
+              network = "default"
+            }
+          }
+          EOF
+
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "Add resource ${{ steps.parse.outputs.name }} from issue #${{ github.event.issue.number }}"
+          branch: "resource-${{ steps.parse.outputs.name }}"
+          title: "Resource Request: ${{ steps.parse.outputs.name }}"
+          body: "Generated from issue #${{ github.event.issue.number }}"
